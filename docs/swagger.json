@@ -1,7 +1,7 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "This is a sample iris app.",
+        "description": "This is a sample gin app.",
         "title": "Swagger Example API",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
@@ -15,7 +15,7 @@
         },
         "version": "1.0"
     },
-    "host": "http://localhost:8080",
+    "host": "http://localhost:3000",
     "basePath": "/",
     "paths": {}
 }

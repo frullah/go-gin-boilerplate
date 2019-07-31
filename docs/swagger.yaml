@@ -1,11 +1,11 @@
 basePath: /
-host: http://localhost:8080
+host: http://localhost:3000
 info:
   contact:
     email: support@swagger.io
     name: API Support
     url: http://www.swagger.io/support
-  description: This is a sample iris app.
+  description: This is a sample gin app.
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
