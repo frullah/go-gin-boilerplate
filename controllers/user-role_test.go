@@ -160,19 +160,19 @@ func TestUserRoleCreateOne(t *testing.T) {
 
 	router := SetupRouter()
 	cases := []routeTestCase{
-		{
+		// client error cases
+		routeTestCase{
 			name:         "empty body",
 			url:          url,
 			method:       method,
 			expectedCode: http.StatusBadRequest,
-			expectedBody: jsonErrEmptyBody,
+			header: http.Header{
+				accessTokenHeader: []string{makeAccessToken(1)},
+			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 				},
-			},
-			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
 			},
 		},
 		{
@@ -195,6 +195,7 @@ func TestUserRoleCreateOne(t *testing.T) {
 			},
 			body: `{"name": "exists-user-role"}`,
 		},
+		// success cases
 		{
 			name:   "valid body",
 			url:    url,
@@ -203,7 +204,12 @@ func TestUserRoleCreateOne(t *testing.T) {
 				accessTokenHeader: []string{makeAccessToken(1)},
 			},
 			expectedCode: http.StatusOK,
-			expectedBody: `{"id": 1}`,
+			expectedBody: `{
+				"status": "success",
+				"data": {
+					"id": 1
+				}
+			}`,
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),

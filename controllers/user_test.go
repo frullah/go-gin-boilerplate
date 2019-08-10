@@ -58,15 +58,18 @@ func TestUserGet(t *testing.T) {
 			url:          "/users/1",
 			expectedCode: http.StatusOK,
 			expectedBody: `{
-				"id": 1,
-				"email": "user-email",
-				"username": "user-username",
-				"name": "user-name",
-				"enabled": true,
-				"role": {
+				"status": "success",
+				"data": {
 					"id": 1,
-					"name": "user-role",
-					"enabled": true
+					"email": "user-email",
+					"username": "user-username",
+					"name": "user-name",
+					"enabled": true,
+					"role": {
+						"id": 1,
+						"name": "user-role",
+						"enabled": true
+					}
 				}
 			}`,
 			header: http.Header{
@@ -132,13 +135,23 @@ func TestUserAvailibility(t *testing.T) {
 			name:         "empty query",
 			url:          "/user-availibility",
 			expectedCode: http.StatusBadRequest,
-			expectedBody: jsonError("context must be an email or username"),
+			expectedBody: `{
+				"status": "fail",
+				"data": {
+					"context": "context must be an email or username"
+				}	
+			}`,
 		},
 		{
 			name:         "invalid context",
 			url:          "/user-availibility?context=neither-username-nor-email",
 			expectedCode: http.StatusBadRequest,
-			expectedBody: jsonError("context must be an email or username"),
+			expectedBody: `{
+				"status": "fail",
+				"data": {
+					"context": "context must be an email or username"
+				}	
+			}`,
 		},
 		routeTestCase{
 			name:         "invalid username format",
@@ -268,6 +281,7 @@ func TestUserRegister(t *testing.T) {
 func TestUserUpdate(t *testing.T) {
 	router := SetupRouter()
 	cases := []routeTestCase{
+		// client error cases
 		{
 			name:         "invalid id param",
 			url:          "/users/x",
@@ -284,7 +298,7 @@ func TestUserUpdate(t *testing.T) {
 		},
 		{
 			name:         "id not found",
-			url:          "/users/1",
+			url:          "/users/0",
 			method:       http.MethodPut,
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
@@ -299,6 +313,29 @@ func TestUserUpdate(t *testing.T) {
 					{
 						[]string{"UPDATE .user. SET .+ WHERE"},
 						gorm.ErrRecordNotFound,
+						true,
+					},
+				},
+			},
+		},
+		// success cases
+		{
+			name:         "id found",
+			url:          "/users/2",
+			method:       http.MethodPut,
+			expectedCode: http.StatusOK,
+			header: http.Header{
+				accessTokenHeader: []string{makeAccessToken(1)},
+			},
+			body: `{
+				"email": "email@domain.tld",
+			}`,
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					sqlExpectAuthRole("administrator"),
+					{
+						[]string{"UPDATE .user. SET .+ WHERE"},
+						sqlmock.NewResult(0, 1),
 						true,
 					},
 				},
@@ -386,7 +423,6 @@ func TestUserCreateOne(t *testing.T) {
 			url:          "/users",
 			method:       http.MethodPost,
 			expectedCode: http.StatusBadRequest,
-			expectedBody: jsonErrEmptyBody,
 			header: http.Header{
 				accessTokenHeader: []string{accessToken},
 			},
