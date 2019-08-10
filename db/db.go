@@ -72,5 +72,6 @@ func SetupTest(instance Instance) (sqlmock.Sqlmock, func() error) {
 	dbMock, sqlMock, _ := sqlmock.New()
 	db[instance], _ = gorm.Open("sqlite3", dbMock)
 	db[instance].SingularTable(true)
+	db[instance].LogMode(true)
 	return sqlMock, db[instance].Close
 }
