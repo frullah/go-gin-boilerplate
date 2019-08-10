@@ -56,9 +56,18 @@ var (
 	)
 	errEmptyToken = errors.New("Empty token")
 
-	jsonErrInvalidAuthorization = jsonError("Invalid authorization")
-	jsonErrUnauthorized         = jsonError("Unauthorized")
-	jsonErrUserDisabled         = jsonError("User disabled")
+	jsonErrInvalidAuthorization = ResponseError{
+		Status:  "error",
+		Message: "Invalid authorization",
+	}
+	jsonErrUnauthorized = ResponseError{
+		Status:  "error",
+		Message: "Unauthorized",
+	}
+	jsonErrUserDisabled = ResponseError{
+		Status:  "error",
+		Message: "User disabled",
+	}
 )
 
 // LoadAuthRoutes to engine
@@ -91,7 +100,7 @@ func AuthLogin(ctx *gin.Context) {
 	}
 
 	if !user.Enabled {
-		ctx.String(http.StatusForbidden, jsonErrUserDisabled)
+		ctx.JSON(http.StatusForbidden, jsonErrUserDisabled)
 		ctx.Abort()
 		return
 	}
@@ -102,8 +111,8 @@ func AuthLogin(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, AuthLoginResponse{
-		AccessToken:  makeAccessToken(user.ID),
-		RefreshToken: makeRefreshToken(user.ID, user.Password),
+		AccessToken:  makeAccessToken(*user.ID),
+		RefreshToken: makeRefreshToken(*user.ID, user.Password),
 	})
 }
 
@@ -122,7 +131,7 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 			}
 			refreshClaims := decoded.Claims.(*JWTClaims)
 			if refreshClaims.UserID != accessClaims.UserID {
-				ctx.String(http.StatusUnauthorized, jsonErrInvalidAuthorization)
+				ctx.JSON(http.StatusUnauthorized, jsonErrInvalidAuthorization)
 				ctx.Abort()
 				return
 			}
@@ -138,7 +147,7 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 			}
 
 			if !user.Enabled {
-				ctx.String(http.StatusUnauthorized, jsonErrUserDisabled)
+				ctx.JSON(http.StatusUnauthorized, jsonErrUserDisabled)
 				ctx.Abort()
 				return
 			}
@@ -170,13 +179,13 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 func shouldParseJWT(ctx *gin.Context, headerKey string, tokenChecker jwt.Keyfunc) (*jwt.Token, error) {
 	token := ctx.GetHeader(headerKey)
 	if token == "" {
-		ctx.String(http.StatusUnauthorized, jsonErrUnauthorized)
+		ctx.JSON(http.StatusUnauthorized, jsonErrUnauthorized)
 		ctx.Abort()
 		return nil, errEmptyToken
 	}
 	decoded, err := jwt.ParseWithClaims(token, &JWTClaims{}, tokenChecker)
 	if _, ok := err.(*jwt.ValidationError); ok {
-		ctx.String(http.StatusUnauthorized, jsonErrInvalidJSONBody)
+		ctx.JSON(http.StatusUnauthorized, jsonErrInvalidJSONBody)
 		ctx.Abort()
 	}
 	return decoded, err

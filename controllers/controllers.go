@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	jsoniter "github.com/json-iterator/go"
-
 	ginvalidator "github.com/frullah/gin-validator"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
@@ -37,9 +35,23 @@ type Uint64ID struct {
 // FieldError object
 type FieldError map[string]string
 
-// MessageResponse ...
-type MessageResponse struct {
-	Message string `json:"message"`
+// Response success or failed to the client
+// if failed, set Status to "fail" with Data as map
+// > which the format is
+// > {[field]: "a message which describe why it's failed in validation"}
+// else if success, set Status to "success" with Data
+type Response struct {
+	Status string      `json:"status"`
+	Data   interface{} `json:"data"`
+}
+
+// ResponseError to the client
+// the keys "Status" ans "Message" is required
+type ResponseError struct {
+	Status  string      `json:"status"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+	Code    int         `json:"code,omitempty"`
 }
 
 const (
@@ -49,9 +61,18 @@ const (
 )
 
 var (
-	jsonErrConflict        = jsonError("Data already exists!")
-	jsonErrInvalidJSONBody = jsonError("Body is not valid JSON")
-	jsonErrEmptyBody       = jsonError("Body should not empty")
+	jsonErrConflict = ResponseError{
+		Status:  "error",
+		Message: "Data already exists!",
+	}
+	jsonErrInvalidJSONBody = ResponseError{
+		Status:  "error",
+		Message: "Body is not valid JSON",
+	}
+	jsonErrEmptyBody = ResponseError{
+		Status:  "error",
+		Message: "Body should not empty",
+	}
 
 	validatorTranslator ut.Translator
 )
@@ -99,15 +120,18 @@ func ErrorMiddleware(ctx *gin.Context) {
 			for _, fieldError := range err {
 				resJSON[fieldError.Field()] = fieldError.Translate(validatorTranslator)
 			}
-			ctx.String(http.StatusBadRequest, jsonFail(resJSON))
+			ctx.JSON(http.StatusBadRequest, Response{"fail", resJSON})
 		default:
-			ctx.String(http.StatusBadRequest, jsonErrEmptyBody)
+			ctx.JSON(http.StatusBadRequest, jsonErrEmptyBody)
 		}
 
 	case gin.ErrorTypePrivate:
 		switch lastError.Err {
 		case gorm.ErrRecordNotFound:
-			ctx.String(http.StatusNotFound, jsonError("data not found"))
+			ctx.JSON(http.StatusNotFound, ResponseError{
+				Status:  "error",
+				Message: "data not found",
+			})
 		default:
 			goto CHECK_ERROR_TYPE
 		}
@@ -131,9 +155,12 @@ func ErrorMiddleware(ctx *gin.Context) {
 }
 
 func internalServerError(ctx *gin.Context, err error) {
-	ctx.String(
+	ctx.JSON(
 		http.StatusInternalServerError,
-		jsonError("Internal server error"),
+		&ResponseError{
+			Status:  "error",
+			Message: "Internal server error",
+		},
 	)
 	log.Println(
 		aurora.BrightRed("[Error]"),
@@ -147,28 +174,15 @@ func configureValidation(v *validator.Validate) {
 	en_translations.RegisterDefaultTranslations(v, validatorTranslator)
 }
 
-func jsonError(str string) string {
-	return `{"status":"error","message":"` + str + `"}`
-}
-
-func jsonSuccess(data interface{}) string {
-	str, _ := jsoniter.MarshalToString(data)
-	return `{"status":"success","data":` + str + `}`
-}
-
-func jsonFail(data interface{}) string {
-	str, _ := jsoniter.MarshalToString(data)
-	return `{"status":"fail","data":` + str + `}`
-}
-
 func mustParseUintParam(ctx *gin.Context, key string, bitSize int) (uint64, error) {
 	res, err := strconv.ParseUint(ctx.Param(key), 10, bitSize)
 	if err != nil {
 		ctx.AbortWithStatusJSON(
 			http.StatusBadRequest,
-			jsonFail(map[string]string{
-				key: key + " is not a number value",
-			}),
+			Response{
+				"fail",
+				map[string]string{key: key + " is not a number value"},
+			},
 		)
 		return res, err
 	}

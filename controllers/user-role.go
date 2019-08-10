@@ -33,7 +33,7 @@ func UserRoleCreateOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(IntID{int(user.ID)}))
+	ctx.JSON(http.StatusOK, &Response{"success", IntID{int(user.ID)}})
 }
 
 // UserRoleUpdate handle PUT /user-roles/:id
@@ -60,7 +60,7 @@ func UserRoleUpdate(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(nil))
+	ctx.JSON(http.StatusOK, &Response{"success", nil})
 }
 
 // UserRoleDelete handle DELETE /user-roles/:id
@@ -78,7 +78,7 @@ func UserRoleDelete(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(nil))
+	ctx.JSON(http.StatusOK, &Response{"success", nil})
 }
 
 // UserRoleGetOne handle GET /user-roles/:id
@@ -97,7 +97,7 @@ func UserRoleGetOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, jsonSuccess(userRole))
+	ctx.JSON(http.StatusOK, &Response{"success", userRole})
 }
 
 // UserRoleGetMany handle GET /user-roles
@@ -122,10 +122,13 @@ func UserRoleGetMany(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(&struct {
-		Count uint64            `json:"count"`
-		Items []models.UserRole `json:"items"`
-	}{count, userRoles}))
+	ctx.JSON(http.StatusOK, &Response{
+		"success",
+		&struct {
+			Count uint64            `json:"count"`
+			Items []models.UserRole `json:"items"`
+		}{count, userRoles},
+	})
 }
 
 // LoadUserRoleRoutes to router

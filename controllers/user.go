@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"strings"
+
+	"github.com/AlekSi/pointer"
 
 	"github.com/gin-gonic/gin/binding"
 
@@ -48,7 +51,12 @@ func UserAvailibility(c *gin.Context) {
 			Value string `json:"value" binding:"required,email"`
 		}{value}
 	default:
-		c.String(http.StatusBadRequest, jsonError("context must be an email or username"))
+		c.JSON(http.StatusBadRequest, &Response{
+			"fail",
+			&struct {
+				Context string `json:"context"`
+			}{"context must be an email or username"},
+		})
 		c.Abort()
 		return
 	}
@@ -68,9 +76,12 @@ func UserAvailibility(c *gin.Context) {
 		return
 	}
 
-	c.String(http.StatusOK, jsonSuccess(struct {
-		Available bool `json:"available"`
-	}{!exists}))
+	c.JSON(http.StatusOK, Response{
+		"success",
+		&struct {
+			Available bool `json:"available"`
+		}{!exists},
+	})
 }
 
 // UserGetOne docs
@@ -95,7 +106,7 @@ func UserGetOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(user))
+	ctx.JSON(http.StatusOK, &Response{"success", user})
 }
 
 // UserCreateOne docs
@@ -135,7 +146,7 @@ func UserCreateOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(Uint64ID{user.ID}))
+	ctx.JSON(http.StatusOK, &Response{"success", Uint64ID{*user.ID}})
 }
 
 // UserUpdate docs
@@ -163,7 +174,7 @@ func UserUpdate(ctx *gin.Context) {
 	ctx.ShouldBindJSON(&body)
 
 	updatedUser := models.User{
-		ID:       id,
+		ID:       pointer.ToUint64(id),
 		Email:    body.Email,
 		Username: body.Username,
 		Password: body.Password,
@@ -175,12 +186,13 @@ func UserUpdate(ctx *gin.Context) {
 		Model(&updatedUser).
 		UpdateColumns(&updatedUser).
 		Error; err != nil {
+		log.Println(err)
 		ctx.Error(err)
 		ctx.Abort()
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(nil))
+	ctx.JSON(http.StatusOK, &Response{"success", nil})
 }
 
 // UserDelete docs
@@ -203,7 +215,7 @@ func UserDelete(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(nil))
+	ctx.JSON(http.StatusOK, &Response{"success", nil})
 }
 
 // UserRegister handles POST /users/register
@@ -234,5 +246,5 @@ func UserRegister(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, jsonSuccess(IntID{int(newUser.ID)}))
+	ctx.JSON(http.StatusOK, Response{"success", IntID{int(*newUser.ID)}})
 }
