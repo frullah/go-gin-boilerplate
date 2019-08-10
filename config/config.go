@@ -1,11 +1,11 @@
 package config
 
 import (
-	"bufio"
 	"os"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/frullah/gin-boilerplate/fs"
-	"gopkg.in/yaml.v3"
 )
 
 // Config struct
@@ -22,30 +22,35 @@ type Config struct {
 	}
 }
 
-const configFileName = "config.yaml"
+const configFileName = "config.toml"
+const defaultPort = uint16(3000)
 
 var (
 	config *Config
 )
 
 // Init config from config.yaml
-func Init() {
+func Init() error {
 	file, err := fs.FS.OpenFile(configFileName, os.O_RDONLY, 0750)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer file.Close()
 
 	config = &Config{}
-	reader := bufio.NewReader(file)
-	decoder := yaml.NewDecoder(reader)
-	err = decoder.Decode(config)
+	_, err = toml.DecodeReader(file, &config)
 	if err != nil {
-		panic(err)
+		return err
 	}
+
+	if config.Server.Port == 0 {
+		config.Server.Port = defaultPort
+	}
+
+	return nil
 }
 
-// Get ...
+// Get config
 func Get() *Config {
 	return config
 }

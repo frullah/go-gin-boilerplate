@@ -14,28 +14,41 @@ func init() {
 }
 
 func TestRead(t *testing.T) {
-	t.Run("file not found", func(t *testing.T) {
-		assert.Panics(t, Init)
+	t.Run("handle file not found", func(t *testing.T) {
+		assert.Error(t, Init())
 	})
 
-	t.Run("parse error", func(t *testing.T) {
+	t.Run("handle format error", func(t *testing.T) {
 		file, _ := fs.FS.OpenFile(configFileName, os.O_CREATE|os.O_WRONLY, 0750)
+		file.WriteString("[key")
 		file.Close()
-		assert.Panics(t, Init)
+		assert.Error(t, Init())
+	})
+
+	t.Run("set to default value", func(t *testing.T) {
+		file, _ := fs.FS.OpenFile(configFileName, os.O_CREATE|os.O_WRONLY, 0750)
+		file.WriteString("[server]")
+		file.Close()
+		require.NoError(t, Init())
+		assert.Equal(t, config.Server.Port, defaultPort)
+
 	})
 
 	t.Run("success", func(t *testing.T) {
 		content := `
-server:
-  host: localhost
-  port: 8080
-db:
-- type: mysql
-  dsn: user:password@tcp(127.0.0.1:3306)/dbname`
-		file, _ := fs.FS.OpenFile(configFileName, os.O_WRONLY, 0750)
-		file.Write([]byte(content))
+[server]
+host = "localhost"
+port = 3000
+
+[[db]]
+name = "default"
+type = "mysql"
+dsn = "root:frullah-cat-eat@/getting_started"
+logging = true`
+		file, _ := fs.FS.OpenFile(configFileName, os.O_CREATE|os.O_WRONLY, 0750)
+		file.WriteString(content)
 		file.Close()
-		require.NotPanics(t, Init)
+		require.NoError(t, Init())
 		assert.NotNil(t, Get())
 	})
 }

@@ -20,7 +20,7 @@ import (
 )
 
 // @title Swagger Example API
-// @version 1.0
+// @version 2.0
 // @description This is a sample gin app.
 // @termsOfService http://swagger.io/terms/
 
@@ -28,7 +28,7 @@ import (
 // @contact.url http://www.swagger.io/support
 // @contact.email support@swagger.io
 
-// @license.name Apache 2.0
+// @license.name MIT
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 
 // @host http://localhost:3000

@@ -6,11 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	jsoniter "github.com/json-iterator/go"
 
-	"github.com/dgrijalva/jwt-go"
 	ginvalidator "github.com/frullah/gin-validator"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
@@ -26,24 +24,18 @@ import (
 	en_translations "gopkg.in/go-playground/validator.v9/translations/en"
 )
 
-// CreateDataResponse - response of new data
-type CreateDataResponse struct {
+// IntID - response of new data
+type IntID struct {
 	ID int `json:"id"`
 }
 
-// CreateBigDataResponse response of new big data
-type CreateBigDataResponse struct {
+// Uint64ID response of new big data
+type Uint64ID struct {
 	ID uint64 `json:"id"`
 }
 
-// FieldError -
-type FieldError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
-}
-
-// FieldErrors is array of FieldError pointer
-type FieldErrors []*FieldError
+// FieldError object
+type FieldError map[string]string
 
 // MessageResponse ...
 type MessageResponse struct {
@@ -57,11 +49,9 @@ const (
 )
 
 var (
-	bcryptCost = 12
-
-	jsonErrConflict        = makeSimpleJSONError("Data already exists!")
-	jsonErrInvalidJSONBody = makeSimpleJSONError("Body is not valid JSON")
-	jsonErrEmptyBody       = makeSimpleJSONError("Body should not empty")
+	jsonErrConflict        = jsonError("Data already exists!")
+	jsonErrInvalidJSONBody = jsonError("Body is not valid JSON")
+	jsonErrEmptyBody       = jsonError("Body should not empty")
 
 	validatorTranslator ut.Translator
 )
@@ -72,10 +62,10 @@ func init() {
 	}
 }
 
-func (c FieldErrors) Error() string {
+func (c FieldError) Error() string {
 	buff := bytes.Buffer{}
-	for _, fieldError := range c {
-		buff.WriteString(fieldError.Message)
+	for _, fieldName := range c {
+		buff.WriteString(c[fieldName])
 		buff.WriteByte('\n')
 	}
 
@@ -100,21 +90,16 @@ func ErrorMiddleware(ctx *gin.Context) {
 		return
 	}
 
-	handled := true
-
 	// checking is error handled or not
 	switch lastError.Type {
 	case gin.ErrorTypeBind:
 		switch err := lastError.Err.(type) {
 		case validator.ValidationErrors:
-			resJSON := make(FieldErrors, len(err))
-			for i, fieldError := range err {
-				resJSON[i] = &FieldError{
-					Field:   fieldError.Field(),
-					Message: fieldError.Translate(validatorTranslator),
-				}
+			resJSON := FieldError{}
+			for _, fieldError := range err {
+				resJSON[fieldError.Field()] = fieldError.Translate(validatorTranslator)
 			}
-			ctx.JSON(http.StatusBadRequest, resJSON)
+			ctx.String(http.StatusBadRequest, jsonFail(resJSON))
 		default:
 			ctx.String(http.StatusBadRequest, jsonErrEmptyBody)
 		}
@@ -122,7 +107,7 @@ func ErrorMiddleware(ctx *gin.Context) {
 	case gin.ErrorTypePrivate:
 		switch lastError.Err {
 		case gorm.ErrRecordNotFound:
-			ctx.String(http.StatusNotFound, `{"message":"Data not found"}`)
+			ctx.String(http.StatusNotFound, jsonError("data not found"))
 		default:
 			goto CHECK_ERROR_TYPE
 		}
@@ -137,33 +122,23 @@ func ErrorMiddleware(ctx *gin.Context) {
 				ctx.JSON(http.StatusConflict, jsonErrConflict)
 			}
 		default:
-			handled = false
+			internalServerError(ctx, lastError.Err)
 		}
 
 	default:
-		handled = false
-	}
-
-	if !handled {
-		ctx.String(
-			http.StatusInternalServerError,
-			`{"status":"internal server error"}`,
-		)
-		log.Println(
-			aurora.BrightRed("[Error]"),
-			aurora.BrightRed(lastError.Err),
-		)
+		internalServerError(ctx, lastError.Err)
 	}
 }
 
-func abortWithString(ctx *gin.Context, code int, format string, args ...interface{}) {
-	ctx.String(code, format, args...)
-	ctx.Abort()
-}
-
-func abortWithError(ctx *gin.Context, err error, errorType gin.ErrorType) {
-	ctx.Error(err).SetType(errorType)
-	ctx.Abort()
+func internalServerError(ctx *gin.Context, err error) {
+	ctx.String(
+		http.StatusInternalServerError,
+		jsonError("Internal server error"),
+	)
+	log.Println(
+		aurora.BrightRed("[Error]"),
+		aurora.BrightRed(err),
+	)
 }
 
 func configureValidation(v *validator.Validate) {
@@ -172,48 +147,29 @@ func configureValidation(v *validator.Validate) {
 	en_translations.RegisterDefaultTranslations(v, validatorTranslator)
 }
 
-func makeJWT(userID uint64, duration time.Duration, secret []byte) string {
-	currentTime := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, JWTClaims{
-		jwt.StandardClaims{
-			ExpiresAt: currentTime.Add(duration).Unix(),
-			IssuedAt:  currentTime.Unix(),
-		},
-		userID,
-	})
-
-	tokenString, _ := token.SignedString(secret)
-	return tokenString
+func jsonError(str string) string {
+	return `{"status":"error","message":"` + str + `"}`
 }
 
-func makeAccessToken(userID uint64) string {
-	return makeJWT(userID, accessTokenDuration, accessTokenSecret)
+func jsonSuccess(data interface{}) string {
+	str, _ := jsoniter.MarshalToString(data)
+	return `{"status":"success","data":` + str + `}`
 }
 
-func makeRefreshToken(userID uint64, pwHash string) string {
-	return makeJWT(userID, refreshTokenDuration, append(refreshTokenSecret, pwHash...))
+func jsonFail(data interface{}) string {
+	str, _ := jsoniter.MarshalToString(data)
+	return `{"status":"fail","data":` + str + `}`
 }
 
-func comparePassword(hashedPassword, password []byte) bool {
-	err := bcrypt.CompareHashAndPassword(hashedPassword, password)
-	return err == nil
-}
-
-func abortInvalidParamValue(ctx *gin.Context, key string) {
-	ctx.AbortWithStatusJSON(
-		http.StatusBadRequest,
-		`{"error":{"message":"param "`+key+`" is not a valid value"}}`,
-	)
-}
-
-func makeSimpleJSONError(str string) string {
-	return `{"error":{"message":"` + str + `"}}`
-}
-
-func parseUintParam(ctx *gin.Context, key string, bitSize int) (uint64, error) {
+func mustParseUintParam(ctx *gin.Context, key string, bitSize int) (uint64, error) {
 	res, err := strconv.ParseUint(ctx.Param(key), 10, bitSize)
 	if err != nil {
-		abortInvalidParamValue(ctx, key)
+		ctx.AbortWithStatusJSON(
+			http.StatusBadRequest,
+			jsonFail(map[string]string{
+				key: key + " is not a number value",
+			}),
+		)
 		return res, err
 	}
 	return res, nil

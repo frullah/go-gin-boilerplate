@@ -3,13 +3,11 @@ package controllers
 import (
 	"bytes"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"testing"
 	"unsafe"
@@ -18,7 +16,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/frullah/gin-boilerplate/db"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,23 +39,20 @@ type tRequest struct {
 }
 
 type tRequestData struct {
-	Header http.Header
-	Query  url.Values
+	header http.Header
 	Body   interface{}
 }
 
 type routeTestCase struct {
 	name             string
-	URL              string
-	Method           string
-	ExpectedBody     string
-	ExpectHasHeaders []string
-	Params           gin.Params
-	Query            url.Values
-	Header           http.Header
-	Body             interface{}
-	DB               dbMockMap
-	ExpectedCode     int
+	url              string
+	method           string
+	expectedBody     string
+	expectHasHeaders []string
+	header           http.Header
+	body             interface{}
+	db               dbMockMap
+	expectedCode     int
 }
 
 type sqlExpect struct {
@@ -77,25 +71,10 @@ var testUserData models.User
 var testDisabledUserData models.User
 
 func init() {
-	bcryptCost = bcrypt.MinCost
-
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	gin.DefaultErrorWriter = os.Stderr
 	gin.SetMode(gin.TestMode)
-
-	testUserData = models.User{
-		ID:       uint64(1),
-		Username: "tester",
-		Email:    "tester@domain.tld",
-		Name:     "Tester",
-		Role: &models.UserRole{
-			ID:   uint64(1),
-			Name: "",
-		},
-	}
-
-	testDisabledUserData = models.User{}
 }
 
 func (c *routeTestCase) run(t *testing.T, engine *gin.Engine) {
@@ -115,10 +94,10 @@ func (c *Test) Teardown() {
 }
 
 func (c routeTestCase) initDB(instance db.Instance, expects ...sqlExpect) {
-	if c.DB == nil {
-		c.DB = dbMockMap{}
+	if c.db == nil {
+		c.db = dbMockMap{}
 	}
-	c.DB[instance] = expects
+	c.db[instance] = expects
 }
 
 // Setup - e2e testing setup
@@ -135,7 +114,7 @@ func Setup(params tSetup) *Test {
 }
 
 func TestControllers(t *testing.T) {
-	_ = FieldErrors{&FieldError{}}.Error()
+	_ = FieldError{"field": "message"}.Error()
 }
 
 func TestErrorMiddleware(t *testing.T) {
@@ -173,17 +152,16 @@ func TestErrorMiddleware(t *testing.T) {
 		context.Error(dummyError).SetType(gin.ErrorTypeAny)
 		ErrorMiddleware(context)
 	})
-
 }
 
 func toHTTPBody(body interface{}) io.Reader {
-	if body == nil {
-		return nil
-	}
-
 	switch x := body.(type) {
+	case nil:
+		return nil
 	case io.Reader:
 		return x
+	case string:
+		return bytes.NewBufferString(x)
 	default:
 		marshalledBody, _ := jsoniter.Marshal(x)
 		return bytes.NewBuffer(marshalledBody)
@@ -197,38 +175,25 @@ func createRequest(params tRequest) *http.Request {
 		toHTTPBody(params.data.Body),
 	)
 
-	if params.data.Header != nil {
-		request.Header = params.data.Header
-	}
-	if params.data.Query != nil {
-		request.URL.RawQuery = params.data.Query.Encode()
+	if params.data.header != nil {
+		request.Header = params.data.header
 	}
 
 	return request
-}
-
-func runHandlers(ctx *gin.Context, handlers []gin.HandlerFunc) {
-	for _, handler := range handlers {
-		handler(ctx)
-		if ctx.IsAborted() {
-			break
-		}
-	}
 }
 
 func testRoute(t *testing.T, router *gin.Engine, testCase *routeTestCase) {
 	t.Helper()
 
 	requestParams := tRequest{
-		URL: testCase.URL,
+		URL: testCase.url,
 		data: tRequestData{
-			Query:  testCase.Query,
-			Body:   testCase.Body,
-			Header: testCase.Header,
+			Body:   testCase.body,
+			header: testCase.header,
 		},
 	}
-	if testCase.Method != "" {
-		requestParams.Method = testCase.Method
+	if testCase.method != "" {
+		requestParams.Method = testCase.method
 	} else {
 		requestParams.Method = http.MethodGet
 	}
@@ -236,8 +201,8 @@ func testRoute(t *testing.T, router *gin.Engine, testCase *routeTestCase) {
 	response := httptest.NewRecorder()
 	req := createRequest(requestParams)
 
-	if testCase.DB != nil {
-		for instance, expects := range testCase.DB {
+	if testCase.db != nil {
+		for instance, expects := range testCase.db {
 			sqlMock, teardown := db.SetupTest(instance)
 			defer teardown()
 			sqlmockExpects(sqlMock, expects...)
@@ -245,21 +210,21 @@ func testRoute(t *testing.T, router *gin.Engine, testCase *routeTestCase) {
 	}
 	router.ServeHTTP(response, req)
 
-	if testCase.ExpectHasHeaders != nil {
+	if testCase.expectHasHeaders != nil {
 		responseHeaders := response.Header()
-		for _, key := range testCase.ExpectHasHeaders {
+		for _, key := range testCase.expectHasHeaders {
 			if responseHeaders.Get(key) == "" {
 				t.Errorf(`header "%s" expect to be have a value`, key)
 			}
 		}
 	}
-	if testCase.ExpectedCode > 0 {
-		assert.Equal(t, testCase.ExpectedCode, response.Code)
+	if testCase.expectedCode > 0 {
+		assert.Equal(t, testCase.expectedCode, response.Code)
 	}
-	if testCase.ExpectedBody != "" {
+	if testCase.expectedBody != "" {
 		responseBodyString := *(*string)(unsafe.Pointer(response.Body))
 		if responseBodyString != "" {
-			testJSONString(t, testCase.ExpectedBody, responseBodyString)
+			assert.JSONEq(t, testCase.expectedBody, responseBodyString)
 		}
 	}
 }
@@ -310,24 +275,17 @@ func sqlmockExpect(sqlMock sqlmock.Sqlmock, param sqlExpect) {
 	}
 }
 
-func testJSONString(t *testing.T, expected, actual string) {
-	t.Helper()
-
-	expectedBuf := bytes.NewBufferString("")
-	require.NoError(t, json.Compact(expectedBuf, []byte(expected)))
-
-	actualBuf := bytes.NewBufferString("")
-	require.NoError(t, json.Compact(actualBuf, []byte(actual)))
-
-	assert.Equal(t,
-		*(*string)(unsafe.Pointer(expectedBuf)),
-		*(*string)(unsafe.Pointer(actualBuf)),
-	)
-}
-
 func SetupRouter() *gin.Engine {
 	router := gin.New()
 	LoadRoutes(router)
 
 	return router
+}
+
+func sqlExpectAuthRole(roleName string) sqlExpect {
+	return sqlExpect{
+		expectedSQL: []string{"SELECT .+ FROM .user."},
+		result: sqlmock.NewRows([]string{"name"}).
+			AddRow(roleName),
+	}
 }

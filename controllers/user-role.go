@@ -8,67 +8,63 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// UserRoleCreateOneBody -
-type UserRoleCreateOneBody struct {
-	Name      string `json:"name" binding:"required"`
-	IsEnabled bool   `json:"isEnabled"`
-}
-
-// UserRoleUpdateBody -
-type UserRoleUpdateBody struct {
-	Name      string `json:"name" binding:"required"`
-	IsEnabled bool   `json:"isEnabled"`
+// UserRoleBody ...
+type UserRoleBody struct {
+	Name    string `json:"name" binding:"required"`
+	Enabled bool   `json:"enabled"`
 }
 
 // UserRoleCreateOne handle POST: /user-roles
 func UserRoleCreateOne(ctx *gin.Context) {
-	data := UserRoleCreateOneBody{}
+	data := UserRoleBody{}
 	if err := ctx.BindJSON(&data); err != nil {
 		return
 	}
 
 	user := models.UserRole{
-		Name:      data.Name,
-		IsEnabled: data.IsEnabled,
+		Name:    data.Name,
+		Enabled: data.Enabled,
 	}
 	if err := db.Get(db.Default).
 		Model(&user).
 		Create(&user).Error; err != nil {
-		abortWithError(ctx, err, gin.ErrorTypePrivate)
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, CreateDataResponse{ID: int(user.ID)})
+	ctx.JSON(http.StatusOK, IntID{ID: int(user.ID)})
 
 }
 
 // UserRoleUpdate handle PUT /user-roles/:id
 func UserRoleUpdate(ctx *gin.Context) {
-	id, err := parseUintParam(ctx, "id", 32)
+	id, err := mustParseUintParam(ctx, "id", 32)
 	if err != nil {
 		return
 	}
 
-	body := UserUpdateBody{}
+	body := UserRoleBody{}
 	ctx.ShouldBindJSON(&body)
 
 	updatedUser := &models.UserRole{
-		ID:        uint32(id),
-		Name:      body.Name,
-		IsEnabled: body.IsEnabled,
+		ID:      uint32(id),
+		Name:    body.Name,
+		Enabled: body.Enabled,
 	}
 	if err := db.Get(db.Default).
 		Model(updatedUser).
 		UpdateColumns(updatedUser).
 		Error; err != nil {
-		abortWithError(ctx, err, gin.ErrorTypePrivate)
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 }
 
 // UserRoleDelete handle DELETE /user-roles/:id
 func UserRoleDelete(ctx *gin.Context) {
-	id, err := parseUintParam(ctx, "id", 32)
+	id, err := mustParseUintParam(ctx, "id", 32)
 	if err != nil {
 		return
 	}
@@ -76,14 +72,15 @@ func UserRoleDelete(ctx *gin.Context) {
 	if err := db.Get(db.Default).
 		Delete(&models.UserRole{}, uint32(id)).
 		Error; err != nil {
-		abortWithError(ctx, err, gin.ErrorTypePrivate)
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 }
 
 // UserRoleGetOne handle GET /user-roles/:id
 func UserRoleGetOne(ctx *gin.Context) {
-	id, err := parseUintParam(ctx, "id", 32)
+	id, err := mustParseUintParam(ctx, "id", 32)
 	if err != nil {
 		return
 	}
@@ -92,7 +89,8 @@ func UserRoleGetOne(ctx *gin.Context) {
 	if err := db.Get(db.Default).
 		First(userRole, uint32(id)).
 		Error; err != nil {
-		abortWithError(ctx, err, gin.ErrorTypePrivate)
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
@@ -101,22 +99,41 @@ func UserRoleGetOne(ctx *gin.Context) {
 
 // UserRoleGetMany handle GET /user-roles
 func UserRoleGetMany(ctx *gin.Context) {
-	userRole := &models.UserRole{}
-	if err := db.Get(db.Default).
-		Error; err != nil {
-		abortWithError(ctx, err, gin.ErrorTypePrivate)
+	userRoles := []models.UserRole{}
+	count := uint64(0)
+	defaultDB := db.Get(db.Default)
+
+	find := defaultDB.Limit(25).Find(&userRoles)
+	if err := find.Error; err != nil {
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, userRole)
+	if err := defaultDB.
+		Table("user_role").
+		Count(&count).
+		Error; err != nil {
+		ctx.Error(err)
+		ctx.Abort()
+		return
+	}
+
+	ctx.String(http.StatusOK, jsonSuccess(&struct {
+		Count uint64            `json:"count"`
+		Items []models.UserRole `json:"items"`
+	}{count, userRoles}))
 }
 
 // LoadUserRoleRoutes to router
 func LoadUserRoleRoutes(router *gin.Engine) {
 	routes := router.Group("/user-roles")
 	authorized := routes.Group("")
-	authorized.Use(AuthMiddleware)
+	authorized.Use(AuthRolesMiddleware(map[string]struct{}{
+		"administrator": {},
+	}))
 	authorized.GET("/:id", UserRoleGetOne)
+	authorized.GET("", UserRoleGetMany)
 	authorized.PUT("/:id", UserRoleUpdate)
 	authorized.DELETE("/:id", UserRoleDelete)
 	authorized.POST("", UserRoleCreateOne)

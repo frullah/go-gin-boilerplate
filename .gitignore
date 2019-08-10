@@ -1,5 +1,6 @@
 .editorconfig
 *.prof
 .vscode
+.VSCodeCounter
 
-coverage.*
+**/coverage.out

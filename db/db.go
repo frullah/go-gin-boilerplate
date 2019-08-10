@@ -22,7 +22,6 @@ var dbInstanceMap = map[string]Instance{
 
 var (
 	db          [InstanceCap]*gorm.DB
-	ctxName     = [InstanceCap]string{Default: "db"}
 	initialized = false
 )
 
@@ -61,9 +60,11 @@ func Get(instance Instance) *gorm.DB {
 	return db[instance]
 }
 
-// Key context
-func Key(instance Instance) string {
-	return ctxName[instance]
+// Close all databases connectioon
+func Close() {
+	for _, dbInstance := range db {
+		dbInstance.Close()
+	}
 }
 
 // SetupTest database
@@ -72,11 +73,4 @@ func SetupTest(instance Instance) (sqlmock.Sqlmock, func() error) {
 	db[instance], _ = gorm.Open("sqlite3", dbMock)
 	db[instance].SingularTable(true)
 	return sqlMock, db[instance].Close
-}
-
-// Close all databases connectioon
-func Close() {
-	for _, dbInstance := range db {
-		dbInstance.Close()
-	}
 }

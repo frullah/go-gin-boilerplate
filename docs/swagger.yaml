@@ -1,4 +1,32 @@
 basePath: /
+definitions:
+  models.User:
+    properties:
+      email:
+        type: string
+      id:
+        type: integer
+      isEnabled:
+        type: boolean
+      name:
+        type: string
+      role:
+        $ref: '#/definitions/models.UserRole'
+        type: object
+      username:
+        type: string
+      verified:
+        type: boolean
+    type: object
+  models.UserRole:
+    properties:
+      id:
+        type: integer
+      isEnabled:
+        type: boolean
+      name:
+        type: string
+    type: object
 host: http://localhost:3000
 info:
   contact:
@@ -11,6 +39,56 @@ info:
     url: http://www.apache.org/licenses/LICENSE-2.0.html
   termsOfService: http://swagger.io/terms/
   title: Swagger Example API
-  version: "1.0"
-paths: {}
+  version: "2.0"
+paths:
+  /users:
+    post:
+      consumes:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+        "401": {}
+        "403": {}
+  /users/{id}:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: User ID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.User'
+          type: object
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+        "401": {}
+        "403": {}
+  /users{id}:
+    delete:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+        "401": {}
+        "403": {}
 swagger: "2.0"
