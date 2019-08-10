@@ -33,8 +33,7 @@ func UserRoleCreateOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, IntID{ID: int(user.ID)})
-
+	ctx.String(http.StatusOK, jsonSuccess(IntID{int(user.ID)}))
 }
 
 // UserRoleUpdate handle PUT /user-roles/:id
@@ -60,6 +59,8 @@ func UserRoleUpdate(ctx *gin.Context) {
 		ctx.Abort()
 		return
 	}
+
+	ctx.String(http.StatusOK, jsonSuccess(nil))
 }
 
 // UserRoleDelete handle DELETE /user-roles/:id
@@ -76,6 +77,8 @@ func UserRoleDelete(ctx *gin.Context) {
 		ctx.Abort()
 		return
 	}
+
+	ctx.String(http.StatusOK, jsonSuccess(nil))
 }
 
 // UserRoleGetOne handle GET /user-roles/:id
@@ -94,7 +97,7 @@ func UserRoleGetOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, userRole)
+	ctx.JSON(http.StatusOK, jsonSuccess(userRole))
 }
 
 // UserRoleGetMany handle GET /user-roles

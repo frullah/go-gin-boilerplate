@@ -95,7 +95,7 @@ func UserGetOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, user)
+	ctx.String(http.StatusOK, jsonSuccess(user))
 }
 
 // UserCreateOne docs
@@ -135,7 +135,7 @@ func UserCreateOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.String(http.StatusOK, jsonSuccess(Uint64ID{ID: user.ID}))
+	ctx.String(http.StatusOK, jsonSuccess(Uint64ID{user.ID}))
 }
 
 // UserUpdate docs
@@ -179,6 +179,8 @@ func UserUpdate(ctx *gin.Context) {
 		ctx.Abort()
 		return
 	}
+
+	ctx.String(http.StatusOK, jsonSuccess(nil))
 }
 
 // UserDelete docs
@@ -200,6 +202,8 @@ func UserDelete(ctx *gin.Context) {
 		ctx.Abort()
 		return
 	}
+
+	ctx.String(http.StatusOK, jsonSuccess(nil))
 }
 
 // UserRegister handles POST /users/register
@@ -230,5 +234,5 @@ func UserRegister(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, IntID{ID: int(newUser.ID)})
+	ctx.JSON(http.StatusOK, jsonSuccess(IntID{int(newUser.ID)}))
 }
