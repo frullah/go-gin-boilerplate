@@ -120,15 +120,15 @@ func ErrorMiddleware(ctx *gin.Context) {
 			for _, fieldError := range err {
 				resJSON[fieldError.Field()] = fieldError.Translate(validatorTranslator)
 			}
-			ctx.JSON(http.StatusBadRequest, Response{"fail", resJSON})
+			ctx.PureJSON(http.StatusBadRequest, Response{"fail", resJSON})
 		default:
-			ctx.JSON(http.StatusBadRequest, jsonErrEmptyBody)
+			ctx.PureJSON(http.StatusBadRequest, jsonErrEmptyBody)
 		}
 
 	case gin.ErrorTypePrivate:
 		switch lastError.Err {
 		case gorm.ErrRecordNotFound:
-			ctx.JSON(http.StatusNotFound, ResponseError{
+			ctx.PureJSON(http.StatusNotFound, ResponseError{
 				Status:  "error",
 				Message: "data not found",
 			})
@@ -143,7 +143,7 @@ func ErrorMiddleware(ctx *gin.Context) {
 		case *mysql.MySQLError:
 			switch err.Number {
 			case 1062:
-				ctx.JSON(http.StatusConflict, jsonErrConflict)
+				ctx.PureJSON(http.StatusConflict, jsonErrConflict)
 			}
 		default:
 			internalServerError(ctx, lastError.Err)
@@ -155,7 +155,7 @@ func ErrorMiddleware(ctx *gin.Context) {
 }
 
 func internalServerError(ctx *gin.Context, err error) {
-	ctx.JSON(
+	ctx.PureJSON(
 		http.StatusInternalServerError,
 		&ResponseError{
 			Status:  "error",
@@ -172,6 +172,49 @@ func configureValidation(v *validator.Validate) {
 	translator := en.New()
 	validatorTranslator, _ = ut.New(translator, translator).GetTranslator("en")
 	en_translations.RegisterDefaultTranslations(v, validatorTranslator)
+
+	v.RegisterAlias("username", "min=5,max=64")
+	v.RegisterAlias("password", "min=5,max=64")
+
+	betweenTranslator := func(min, max int) validator.TranslationFunc {
+		minStr := strconv.Itoa(min)
+		maxStr := strconv.Itoa(max)
+		minFloat := float64(min)
+		maxFloat := float64(max)
+
+		return func(ut ut.Translator, fe validator.FieldError) string {
+			var msg string
+			valueLen := len(fe.Value().(string))
+
+			if valueLen < min {
+				param, _ := ut.C("min-string-character", minFloat, 0, minStr)
+				msg, _ = ut.T("min-string", fe.Field(), param)
+			}
+
+			if valueLen > max {
+				param, _ := ut.C("max-string-character", maxFloat, 0, maxStr)
+				msg, _ = ut.T("max-string", fe.Field(), param)
+			}
+
+			return msg
+		}
+	}
+	emptyRegisterTranslationFn := func(t ut.Translator) error {
+		return nil
+	}
+
+	v.RegisterTranslation(
+		"username",
+		validatorTranslator,
+		emptyRegisterTranslationFn,
+		betweenTranslator(5, 64),
+	)
+	v.RegisterTranslation(
+		"password",
+		validatorTranslator,
+		emptyRegisterTranslationFn,
+		betweenTranslator(5, 64),
+	)
 }
 
 func mustParseUintParam(ctx *gin.Context, key string, bitSize int) (uint64, error) {

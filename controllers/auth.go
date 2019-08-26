@@ -15,18 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthLoginParams login parameters
-type AuthLoginParams struct {
-	Username string `json:"username" binding:"required,min=5,max=64"`
-	Password string `json:"password" binding:"required,min=5,max=64"`
-}
-
-// AuthLoginResponse ...
-type AuthLoginResponse struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-}
-
 // JWTClaims struct
 type JWTClaims struct {
 	jwt.StandardClaims
@@ -37,8 +25,10 @@ const (
 	accessTokenDuration  = 10 * time.Minute
 	refreshTokenDuration = 7 * (24 * time.Hour)
 
-	accessTokenHeader  = "X-Access-Token"
-	refreshTokenHeader = "X-Refresh-Token"
+	// AccessTokenHeader ...
+	AccessTokenHeader = "X-Access-Token"
+	// RefreshTokenHeader ...
+	RefreshTokenHeader = "X-Refresh-Token"
 )
 
 var (
@@ -56,15 +46,15 @@ var (
 	)
 	errEmptyToken = errors.New("Empty token")
 
-	jsonErrInvalidAuthorization = ResponseError{
+	jsonErrInvalidAuthorization = &ResponseError{
 		Status:  "error",
 		Message: "Invalid authorization",
 	}
-	jsonErrUnauthorized = ResponseError{
+	jsonErrUnauthorized = &ResponseError{
 		Status:  "error",
 		Message: "Unauthorized",
 	}
-	jsonErrUserDisabled = ResponseError{
+	jsonErrUserDisabled = &ResponseError{
 		Status:  "error",
 		Message: "User disabled",
 	}
@@ -74,13 +64,23 @@ var (
 func LoadAuthRoutes(router *gin.Engine) {
 	group := router.Group("/auth")
 	group.POST("/login", AuthLogin)
-	group.GET("/google/v2/")
+	// group.GET("/google/v2")
+
+	authenticated := group.Group("")
+	authenticated.Use(AuthRolesMiddleware(nil))
+	authenticated.GET("data", AuthData)
 }
 
-// AuthLogin handle POST /auth/login
+// AuthLogin handler
+// @Success 200 {object} struct{AccessToken string}
+// @Failure 401
+// @Failure 403 ResponseError
+// @Router /auth/login [post]
 func AuthLogin(ctx *gin.Context) {
-	body := AuthLoginParams{}
-
+	body := struct {
+		Username string `json:"username" binding:"username"`
+		Password string `json:"password" binding:"password"`
+	}{}
 	if err := ctx.BindJSON(&body); err != nil {
 		return
 	}
@@ -91,47 +91,97 @@ func AuthLogin(ctx *gin.Context) {
 		First(&user, "username = ?", body.Username).
 		Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			ctx.AbortWithStatus(http.StatusUnauthorized)
+			ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
 		} else {
 			ctx.Error(err)
 			ctx.Abort()
 		}
+
 		return
 	}
 
 	if !user.Enabled {
-		ctx.JSON(http.StatusForbidden, jsonErrUserDisabled)
+		ctx.PureJSON(http.StatusForbidden, jsonErrUserDisabled)
 		ctx.Abort()
 		return
 	}
 
 	if !comparePassword([]byte(user.Password), []byte(body.Password)) {
-		ctx.AbortWithStatus(http.StatusUnauthorized)
+		ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, AuthLoginResponse{
+	ctx.PureJSON(http.StatusOK, struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+	}{
 		AccessToken:  makeAccessToken(*user.ID),
-		RefreshToken: makeRefreshToken(*user.ID, user.Password),
+		RefreshToken: makeRefreshToken(*user.ID),
 	})
+}
+
+// AuthData retrieve data from authenticated user
+// @Success 200 {object} type struct{}
+// @Failure 401
+// @Router /auth/data [get]
+func AuthData(ctx *gin.Context) {
+	userID := ctx.MustGet("userID").(uint64)
+	user := models.User{Role: &models.UserRole{}}
+	if err := db.Get(db.Default).
+		Select("enabled, username, name").
+		First(&user, userID).
+		Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
+		} else {
+			ctx.Error(err)
+		}
+		return
+	}
+
+	if !user.Enabled {
+		ctx.PureJSON(http.StatusForbidden, jsonErrUserDisabled)
+		return
+	}
+
+	userRole := models.UserRole{}
+	db.Get(db.Default).Select("enabled, name").First(&userRole, user.RoleID)
+	if !userRole.Enabled {
+		ctx.PureJSON(http.StatusForbidden, jsonErrUserDisabled)
+		return
+	}
+
+	ctx.PureJSON(http.StatusOK, &Response{"success", &struct {
+		Username string `json:"username"`
+		Name     string `json:"name"`
+		Role     string `json:"role"`
+	}{user.Username, user.Name, userRole.Name}})
 }
 
 // AuthRolesMiddleware function
 func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 	return func(ctx *gin.Context) {
-		decoded, err := shouldParseJWT(ctx, accessTokenHeader, accessTokenChecker)
+		decoded, err := parseAccessToken(ctx)
 		if err == errEmptyToken || err == errInvalidTokenMethod || decoded == nil {
+			ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
+			ctx.Abort()
 			return
 		}
+
+		shouldCreateNewToken := false
 		accessClaims := decoded.Claims.(*JWTClaims)
 		if err != nil {
-			decoded, err := shouldParseJWT(ctx, refreshTokenHeader, refreshTokenChecker)
+			decoded, err := parseRefreshToken(ctx)
 			if err != nil || decoded == nil || !decoded.Valid {
+				ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
+				ctx.Abort()
 				return
 			}
+
 			refreshClaims := decoded.Claims.(*JWTClaims)
 			if refreshClaims.UserID != accessClaims.UserID {
-				ctx.JSON(http.StatusUnauthorized, jsonErrInvalidAuthorization)
+				ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
 				ctx.Abort()
 				return
 			}
@@ -141,22 +191,18 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 				Select("enabled, password").
 				First(&user, refreshClaims.UserID).
 				Error; err != nil {
-				ctx.Error(err)
+				ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
 				ctx.Abort()
 				return
 			}
 
 			if !user.Enabled {
-				ctx.JSON(http.StatusUnauthorized, jsonErrUserDisabled)
+				ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
 				ctx.Abort()
 				return
 			}
 
-			ctx.Header(accessTokenHeader, makeAccessToken(accessClaims.UserID))
-			ctx.Header(
-				refreshTokenHeader,
-				makeRefreshToken(refreshClaims.UserID, user.Password),
-			)
+			shouldCreateNewToken = true
 		}
 
 		if allowedRoles != nil {
@@ -167,8 +213,15 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 				Joins("INNER JOIN user ON user_role.id = user.role_id").
 				First(&role, accessClaims.UserID)
 			if _, ok := allowedRoles[role.Name]; !ok {
+				ctx.PureJSON(http.StatusUnauthorized, jsonErrUnauthorized)
+				ctx.Abort()
 				return
 			}
+		}
+
+		if shouldCreateNewToken {
+			ctx.Header(AccessTokenHeader, makeAccessToken(accessClaims.UserID))
+			ctx.Header(RefreshTokenHeader, makeRefreshToken(accessClaims.UserID))
 		}
 
 		ctx.Set("userID", accessClaims.UserID)
@@ -176,19 +229,20 @@ func AuthRolesMiddleware(allowedRoles map[string]struct{}) func(*gin.Context) {
 	}
 }
 
-func shouldParseJWT(ctx *gin.Context, headerKey string, tokenChecker jwt.Keyfunc) (*jwt.Token, error) {
+func parseJWT(ctx *gin.Context, headerKey string, tokenChecker jwt.Keyfunc) (*jwt.Token, error) {
 	token := ctx.GetHeader(headerKey)
 	if token == "" {
-		ctx.JSON(http.StatusUnauthorized, jsonErrUnauthorized)
-		ctx.Abort()
 		return nil, errEmptyToken
 	}
-	decoded, err := jwt.ParseWithClaims(token, &JWTClaims{}, tokenChecker)
-	if _, ok := err.(*jwt.ValidationError); ok {
-		ctx.JSON(http.StatusUnauthorized, jsonErrInvalidJSONBody)
-		ctx.Abort()
-	}
-	return decoded, err
+	return jwt.ParseWithClaims(token, &JWTClaims{}, tokenChecker)
+}
+
+func parseAccessToken(ctx *gin.Context) (*jwt.Token, error) {
+	return parseJWT(ctx, AccessTokenHeader, accessTokenChecker)
+}
+
+func parseRefreshToken(ctx *gin.Context) (*jwt.Token, error) {
+	return parseJWT(ctx, RefreshTokenHeader, refreshTokenChecker)
 }
 
 func jwtCheck(secret []byte) jwt.Keyfunc {
@@ -196,6 +250,7 @@ func jwtCheck(secret []byte) jwt.Keyfunc {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errInvalidTokenMethod
 		}
+
 		return secret, nil
 	}
 }
@@ -209,8 +264,8 @@ func makeJWT(userID uint64, duration time.Duration, secret []byte) string {
 	currentTime := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, JWTClaims{
 		jwt.StandardClaims{
-			ExpiresAt: currentTime.Add(duration).Unix(),
 			IssuedAt:  currentTime.Unix(),
+			ExpiresAt: currentTime.Add(duration).Unix(),
 		},
 		userID,
 	})
@@ -223,6 +278,6 @@ func makeAccessToken(userID uint64) string {
 	return makeJWT(userID, accessTokenDuration, accessTokenSecret)
 }
 
-func makeRefreshToken(userID uint64, pwHash string) string {
-	return makeJWT(userID, refreshTokenDuration, append(refreshTokenSecret, pwHash...))
+func makeRefreshToken(userID uint64) string {
+	return makeJWT(userID, refreshTokenDuration, refreshTokenSecret)
 }

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestUserRoleGetOne(t *testing.T) {
 			url:          url + "/x",
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
@@ -34,13 +33,13 @@ func TestUserRoleGetOne(t *testing.T) {
 			url:          url + "/1",
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"SELECT .+ FROM .user_role. WHERE"},
+						"SELECT .+ FROM .user_role.",
 						gorm.ErrRecordNotFound,
 						false,
 					},
@@ -51,13 +50,13 @@ func TestUserRoleGetOne(t *testing.T) {
 			name: "role id is found",
 			url:  url + "/1",
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"SELECT .+ FROM .user_role."},
+						"SELECT .+ FROM .user_role.",
 						sqlmock.NewRows([]string{"id", "name", "enabled"}).
 							AddRow(uint32(1), "user-role", true),
 						false,
@@ -76,21 +75,18 @@ func TestUserRoleGetMany(t *testing.T) {
 
 	router := SetupRouter()
 	cases := []routeTestCase{
+		// internal error cases
 		{
 			name:         "handle find error",
 			url:          url,
 			expectedCode: http.StatusInternalServerError,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
-					{
-						[]string{"SELECT .+ FROM .user_role."},
-						errors.New(""),
-						false,
-					},
+					{"SELECT .+ FROM .user_role.", errDummy, false},
 				},
 			},
 		},
@@ -99,25 +95,17 @@ func TestUserRoleGetMany(t *testing.T) {
 			url:          url,
 			expectedCode: http.StatusInternalServerError,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
-					{
-						[]string{"SELECT .+ FROM .user_role."},
-						sqlmock.NewRows([]string{}),
-						false,
-					},
-					{
-						[]string{"SELECT count\\(\\*\\) FROM .user_role."},
-						errors.New(""),
-						false,
-					},
+					{"SELECT .+ FROM .user_role.", sqlmock.NewRows([]string{}), false},
+					{"SELECT count.+ FROM .user_role.", errDummy, false},
 				},
 			},
 		},
-
+		// success cases
 		{
 			name:         "empty data",
 			url:          url,
@@ -130,18 +118,14 @@ func TestUserRoleGetMany(t *testing.T) {
 				}
 			}`,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
+					{"SELECT .+ FROM .user_role.", sqlmock.NewRows([]string{}), false},
 					{
-						[]string{"SELECT .+ FROM .user_role."},
-						sqlmock.NewRows([]string{}),
-						false,
-					},
-					{
-						[]string{"SELECT count\\(\\*\\) FROM .user_role."},
+						"SELECT count.+ FROM .user_role.",
 						sqlmock.NewRows([]string{"count(*)"}).AddRow(0),
 						false,
 					},
@@ -167,7 +151,7 @@ func TestUserRoleCreateOne(t *testing.T) {
 			method:       method,
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
@@ -181,13 +165,13 @@ func TestUserRoleCreateOne(t *testing.T) {
 			url:          url,
 			method:       method,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{`INSERT INTO .user_role.`},
+						`INSERT INTO .user_role.`,
 						&mysql.MySQLError{Number: uint16(1062)},
 						true,
 					},
@@ -201,7 +185,7 @@ func TestUserRoleCreateOne(t *testing.T) {
 			url:    url,
 			method: method,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: `{
@@ -213,11 +197,7 @@ func TestUserRoleCreateOne(t *testing.T) {
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
-					{
-						[]string{`INSERT INTO .user_role.`},
-						sqlmock.NewResult(1, 1),
-						true,
-					},
+					{`INSERT INTO .user_role.`, sqlmock.NewResult(1, 1), true},
 				},
 			},
 			body: `{"name": "new-user-role", "enabled": true}`,
@@ -246,7 +226,7 @@ func TestUserRoleUpdate(t *testing.T) {
 				},
 			},
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 		},
 		{
@@ -255,13 +235,13 @@ func TestUserRoleUpdate(t *testing.T) {
 			method:       method,
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"UPDATE .user_role. SET"},
+						"UPDATE .user_role. SET",
 						gorm.ErrRecordNotFound,
 						true,
 					},
@@ -274,14 +254,14 @@ func TestUserRoleUpdate(t *testing.T) {
 			method:       method,
 			expectedCode: http.StatusOK,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			body: `{"name": "new user role name"}`,
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"UPDATE .user_role. SET"},
+						"UPDATE .user_role. SET",
 						sqlmock.NewResult(1, 1),
 						true,
 					},
@@ -307,7 +287,7 @@ func TestUserRoleDelete(t *testing.T) {
 			method:       method,
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
@@ -324,14 +304,14 @@ func TestUserRoleDelete(t *testing.T) {
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"DELETE FROM .user_role."},
+						"DELETE FROM .user_role.",
 						gorm.ErrRecordNotFound,
 						true,
 					},
 				},
 			},
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 		},
 		{
@@ -340,13 +320,13 @@ func TestUserRoleDelete(t *testing.T) {
 			method:       method,
 			expectedCode: http.StatusOK,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: {
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"DELETE FROM .user_role."},
+						"DELETE FROM .user_role.",
 						sqlmock.NewResult(1, 1),
 						true,
 					},

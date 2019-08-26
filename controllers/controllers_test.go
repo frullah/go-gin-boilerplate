@@ -56,7 +56,7 @@ type routeTestCase struct {
 }
 
 type sqlExpect struct {
-	expectedSQL []string
+	expectedSQL string
 	result      interface{}
 	transaction bool
 }
@@ -69,6 +69,7 @@ type Test struct {
 
 var testUserData models.User
 var testDisabledUserData models.User
+var errDummy = errors.New("testing")
 
 func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -118,9 +119,8 @@ func TestControllers(t *testing.T) {
 }
 
 func TestErrorMiddleware(t *testing.T) {
-	dummyError := errors.New("testing ErrorMiddleware")
 	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
+	ctx, _ := gin.CreateTestContext(recorder)
 
 	t.Run("run after handler", func(t *testing.T) {
 		const url = "/a-route-url"
@@ -128,29 +128,29 @@ func TestErrorMiddleware(t *testing.T) {
 		router := gin.New()
 		router.Use(ErrorMiddleware)
 		router.GET(url, func(ctx *gin.Context) {
-			ctx.Error(dummyError).SetType(gin.ErrorTypePrivate)
+			ctx.Error(errDummy).SetType(gin.ErrorTypePrivate)
 		})
 		router.ServeHTTP(recorder, request)
 		require.Equal(t, http.StatusInternalServerError, recorder.Code, "ErrorMiddleware is not running after handler")
 	})
 
 	t.Run("without error", func(t *testing.T) {
-		ErrorMiddleware(context)
+		ErrorMiddleware(ctx)
 	})
 
 	t.Run("unhandled bind", func(t *testing.T) {
-		context.Error(dummyError).SetType(gin.ErrorTypeBind)
-		ErrorMiddleware(context)
+		ctx.Error(errDummy).SetType(gin.ErrorTypeBind)
+		ErrorMiddleware(ctx)
 	})
 
 	t.Run("unhandled private error type", func(t *testing.T) {
-		context.Error(dummyError).SetType(gin.ErrorTypePrivate)
-		ErrorMiddleware(context)
+		ctx.Error(errDummy).SetType(gin.ErrorTypePrivate)
+		ErrorMiddleware(ctx)
 	})
 
 	t.Run("unknown error type", func(t *testing.T) {
-		context.Error(dummyError).SetType(gin.ErrorTypeAny)
-		ErrorMiddleware(context)
+		ctx.Error(errDummy).SetType(gin.ErrorTypeAny)
+		ErrorMiddleware(ctx)
 	})
 }
 
@@ -204,6 +204,11 @@ func testRoute(t *testing.T, router *gin.Engine, testCase *routeTestCase) {
 	if testCase.db != nil {
 		for instance, expects := range testCase.db {
 			sqlMock, teardown := db.SetupTest(instance)
+			defer func() {
+				if err := sqlMock.ExpectationsWereMet(); err != nil {
+					t.Error(err)
+				}
+			}()
 			defer teardown()
 			sqlmockExpects(sqlMock, expects...)
 		}
@@ -239,37 +244,37 @@ func sqlmockExpect(sqlMock sqlmock.Sqlmock, param sqlExpect) {
 	if param.transaction {
 		sqlMock.ExpectBegin()
 	}
-	for _, expectedSQL := range param.expectedSQL {
-		if expectedSQL[:len("SELECT ")] == "SELECT " {
-			query := sqlMock.ExpectQuery(expectedSQL)
-			switch res := param.result.(type) {
-			case *sqlmock.Rows:
-				query.WillReturnRows(res)
-			case error:
-				query.WillReturnError(res)
-				if param.transaction {
-					sqlMock.ExpectRollback()
-					return
-				}
-			default:
-				panic(errors.New("result must be a *sqlmock.Rows or error"))
+
+	if param.expectedSQL[:len("SELECT ")] == "SELECT " {
+		query := sqlMock.ExpectQuery(param.expectedSQL)
+		switch res := param.result.(type) {
+		case *sqlmock.Rows:
+			query.WillReturnRows(res)
+		case error:
+			query.WillReturnError(res)
+			if param.transaction {
+				sqlMock.ExpectRollback()
+				return
 			}
-		} else {
-			exec := sqlMock.ExpectExec(expectedSQL)
-			switch res := param.result.(type) {
-			case driver.Result:
-				exec.WillReturnResult(res)
-			case error:
-				exec.WillReturnError(res)
-				if param.transaction {
-					sqlMock.ExpectRollback()
-					return
-				}
-			default:
-				panic(errors.New("result must be a driver.Result or error"))
+		default:
+			panic(errors.New("result must be a *sqlmock.Rows or error"))
+		}
+	} else {
+		exec := sqlMock.ExpectExec(param.expectedSQL)
+		switch res := param.result.(type) {
+		case driver.Result:
+			exec.WillReturnResult(res)
+		case error:
+			exec.WillReturnError(res)
+			if param.transaction {
+				sqlMock.ExpectRollback()
+				return
 			}
+		default:
+			panic(errors.New("result must be a driver.Result or error"))
 		}
 	}
+
 	if param.transaction {
 		sqlMock.ExpectCommit()
 	}
@@ -284,7 +289,7 @@ func SetupRouter() *gin.Engine {
 
 func sqlExpectAuthRole(roleName string) sqlExpect {
 	return sqlExpect{
-		expectedSQL: []string{"SELECT .+ FROM .user."},
+		expectedSQL: "SELECT .+ FROM .user.",
 		result: sqlmock.NewRows([]string{"name"}).
 			AddRow(roleName),
 	}

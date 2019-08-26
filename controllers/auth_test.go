@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -44,8 +43,8 @@ func TestAuthLogin(t *testing.T) {
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
-						errors.New("test: Login controller error handling"),
+						"SELECT .+ FROM .user.",
+						errDummy,
 						false,
 					},
 				},
@@ -74,7 +73,7 @@ func TestAuthLogin(t *testing.T) {
 			expectedCode: http.StatusUnauthorized,
 			db: dbMockMap{
 				db.Default: []sqlExpect{
-					{[]string{"SELECT .+ FROM .user."}, gorm.ErrRecordNotFound, false},
+					{"SELECT .+ FROM .user.", gorm.ErrRecordNotFound, false},
 				},
 			},
 			body: makeBody("unknown-username", password),
@@ -87,7 +86,7 @@ func TestAuthLogin(t *testing.T) {
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"enabled"}).AddRow(false),
 						false,
 					},
@@ -103,7 +102,7 @@ func TestAuthLogin(t *testing.T) {
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"password", "enabled"}).
 							AddRow("hashed-password", true),
 						false,
@@ -121,7 +120,7 @@ func TestAuthLogin(t *testing.T) {
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"id", "password", "enabled"}).
 							AddRow(uint64(1), hashedPassword, true),
 						false,
@@ -136,62 +135,227 @@ func TestAuthLogin(t *testing.T) {
 		t.Run(handler.name, func(t *testing.T) { handler.run(t, router) })
 	}
 }
+
+func TestAuthData(t *testing.T) {
+	const url = "/auth/data"
+	createRows := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"enabled", "username", "name"})
+	}
+
+	router := SetupRouter()
+	cases := []routeTestCase{
+		// error handling cases
+		routeTestCase{
+			name:         "handle db error",
+			url:          url,
+			expectedCode: http.StatusInternalServerError,
+			header: http.Header{
+				AccessTokenHeader: []string{makeAccessToken(1)},
+			},
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{
+						"SELECT .+ FROM .user.",
+						errDummy,
+						false,
+					},
+				},
+			},
+		},
+		// client error cases
+		routeTestCase{
+			name:         "user not found",
+			url:          url,
+			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"
+			}`,
+			header: http.Header{
+				AccessTokenHeader: []string{makeAccessToken(1)},
+			},
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{"SELECT .+ FROM .user.", gorm.ErrRecordNotFound, false},
+				},
+			},
+		},
+		{
+			name:         "disabled user",
+			url:          url,
+			expectedCode: http.StatusForbidden,
+			expectedBody: `{
+				"status": "error",
+				"message": "User disabled"
+			}`,
+			header: http.Header{
+				AccessTokenHeader: []string{makeAccessToken(1)},
+			},
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{
+						"SELECT .+ FROM .user.",
+						createRows().
+							AddRow(false, "member", "Member Name"),
+						false,
+					},
+				},
+			},
+		},
+		{
+			name:         "disabled user role",
+			url:          url,
+			expectedCode: http.StatusForbidden,
+			expectedBody: `{
+				"status": "error",
+				"message": "User disabled"
+			}`,
+			header: http.Header{
+				AccessTokenHeader: []string{makeAccessToken(1)},
+			},
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{
+						"SELECT .+ FROM .user.",
+						createRows().
+							AddRow(true, "member", "Member Name"),
+						false,
+					},
+					{
+						"SELECT .+ FROM .user_role.",
+						sqlmock.NewRows([]string{"enabled", "name"}).
+							AddRow(false, "member"),
+						false,
+					},
+				},
+			},
+		},
+
+		// success cases
+		{
+			name:         "success",
+			url:          url,
+			expectedCode: http.StatusOK,
+			expectedBody: `{
+				"status": "success",
+				"data": {
+					"username": "admin",
+					"name": "Administrator",
+					"role": "administrator"
+				}
+			}`,
+			header: http.Header{
+				AccessTokenHeader:  []string{makeAccessToken(1)},
+				RefreshTokenHeader: []string{makeRefreshToken(1)},
+			},
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{
+						"SELECT .+ FROM .user.",
+						createRows().
+							AddRow(true, "admin", "Administrator"),
+						false,
+					},
+					{
+						"SELECT .+ FROM .user_role.",
+						sqlmock.NewRows([]string{"enabled", "name"}).
+							AddRow(true, "administrator"),
+						false,
+					},
+				},
+			},
+		},
+	}
+
+	for _, handler := range cases {
+		t.Run(handler.name, func(t *testing.T) { handler.run(t, router) })
+	}
+}
+
 func TestAuthMiddleware(t *testing.T) {
-	var unacceptedToken string
+	var invalidToken string
 	// create unaccepted method token
 	{
 		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.StandardClaims{
 			ExpiresAt: 0,
 		})
-		unacceptedToken, _ = token.SignedString(key)
+		invalidToken, _ = token.SignedString(key)
 	}
-	validRefreshToken := makeRefreshToken(1, "")
+	validRefreshToken := makeRefreshToken(1)
 	expiredAccessToken := makeJWT(1, -time.Second, accessTokenSecret)
 
 	router := gin.New()
 	router.GET("/", AuthRolesMiddleware(nil))
+	router.GET("/roles", AuthRolesMiddleware(map[string]struct{}{
+		"administrator": {},
+	}))
 	routeCases := []routeTestCase{
+		// client error cases
 		{
 			name:         "without access token",
 			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
 		},
 		{
 			name:         "invalid access token",
 			expectedCode: http.StatusUnauthorized,
-			header:       http.Header{accessTokenHeader: []string{"invalid token"}},
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
+			header: http.Header{AccessTokenHeader: []string{"invalid token"}},
 		},
 		{
 			name:         "invalid token method",
 			expectedCode: http.StatusUnauthorized,
-			header:       http.Header{accessTokenHeader: []string{unacceptedToken}},
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
+			header: http.Header{AccessTokenHeader: []string{invalidToken}},
 		},
 		{
 			name:         "expired access token",
 			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
 			header: http.Header{
-				accessTokenHeader: []string{expiredAccessToken},
+				AccessTokenHeader: []string{expiredAccessToken},
 			},
 		},
 		{
 			name:         "expired access token with refresh token but different user id",
 			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
 			header: http.Header{
-				accessTokenHeader:  []string{expiredAccessToken},
-				refreshTokenHeader: []string{makeRefreshToken(3, "")},
+				AccessTokenHeader:  []string{expiredAccessToken},
+				RefreshTokenHeader: []string{makeRefreshToken(3)},
 			},
 		},
 		{
-			name:         "expired access token with refresh token but user id not found",
+			name:         "expired access token with valid refresh token but the user id is not found",
 			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
 			header: http.Header{
-				accessTokenHeader:  []string{expiredAccessToken},
-				refreshTokenHeader: []string{validRefreshToken},
+				AccessTokenHeader:  []string{expiredAccessToken},
+				RefreshTokenHeader: []string{validRefreshToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						gorm.ErrRecordNotFound,
 						false,
 					},
@@ -199,49 +363,42 @@ func TestAuthMiddleware(t *testing.T) {
 			},
 		},
 		{
-			name:         "expired access token with refresh token but disabled user",
+			name:         "expired access token with valid refresh token but the user is disabled",
 			expectedCode: http.StatusUnauthorized,
+			expectedBody: `{
+				"status": "error",
+				"message": "Unauthorized"	
+			}`,
 			header: http.Header{
-				accessTokenHeader:  []string{expiredAccessToken},
-				refreshTokenHeader: []string{validRefreshToken},
+				AccessTokenHeader:  []string{expiredAccessToken},
+				RefreshTokenHeader: []string{validRefreshToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"enabled", "password"}).
 							AddRow(false, "user-password-hash"),
-						false,
-					},
-					{
-						[]string{"SELECT .+"},
-						sqlmock.NewRows([]string{"name"}).
-							AddRow("administrator"),
 						false,
 					},
 				},
 			},
 		},
+		// success cases
 		{
 			name:             "expired access token with valid refresh token",
-			expectedCode:     http.StatusUnauthorized,
-			expectHasHeaders: []string{accessTokenHeader, refreshTokenHeader},
+			expectedCode:     http.StatusOK,
+			expectHasHeaders: []string{AccessTokenHeader, RefreshTokenHeader},
 			header: http.Header{
-				accessTokenHeader:  []string{expiredAccessToken},
-				refreshTokenHeader: []string{validRefreshToken},
+				AccessTokenHeader:  []string{expiredAccessToken},
+				RefreshTokenHeader: []string{validRefreshToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"enabled", "password", "role_id"}).
 							AddRow(true, "user-password-hash", uint64(1)),
-						false,
-					},
-					{
-						[]string{"SELECT .+"},
-						sqlmock.NewRows([]string{"name"}).
-							AddRow("administrator"),
 						false,
 					},
 				},
@@ -251,16 +408,19 @@ func TestAuthMiddleware(t *testing.T) {
 			name:         "valid access token",
 			expectedCode: http.StatusOK,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
+			},
+		},
+		routeTestCase{
+			name:         "should prevent when role not included",
+			url:          "/roles",
+			expectedCode: http.StatusUnauthorized,
+			header: http.Header{
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
-					{
-						[]string{"SELECT .+"},
-						sqlmock.NewRows([]string{"name"}).
-							AddRow("administrator"),
-						false,
-					},
+					sqlExpectAuthRole("user"),
 				},
 			},
 		},

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestUserGet(t *testing.T) {
+func TestUserGetOne(t *testing.T) {
 	accessToken := makeAccessToken(1)
 
 	router := SetupRouter()
@@ -26,7 +25,7 @@ func TestUserGet(t *testing.T) {
 			url:          "/users/x",
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
@@ -39,13 +38,13 @@ func TestUserGet(t *testing.T) {
 			url:          "/users/1",
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						gorm.ErrRecordNotFound,
 						false,
 					},
@@ -73,13 +72,13 @@ func TestUserGet(t *testing.T) {
 				}
 			}`,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"SELECT .+ FROM .user."},
+						"SELECT .+ FROM .user.",
 						sqlmock.NewRows([]string{"id", "email",
 							"username",
 							"password",
@@ -99,7 +98,7 @@ func TestUserGet(t *testing.T) {
 						false,
 					},
 					{
-						[]string{"SELECT .+ FROM .user_role."},
+						"SELECT .+ FROM .user_role.",
 						sqlmock.NewRows([]string{"id", "name", "enabled"}).
 							AddRow(uint32(1), "user-role", true),
 						false,
@@ -115,25 +114,27 @@ func TestUserGet(t *testing.T) {
 }
 
 func TestUserAvailibility(t *testing.T) {
+	const url = "/user-availibility"
+
 	router := SetupRouter()
 	cases := []routeTestCase{
-		// testing db error
+		// internal error cases
 		routeTestCase{
-			name:         "handle db check error",
-			url:          "/user-availibility?context=username&value=exists-username",
+			name:         "handle db error",
+			url:          url + "?context=username&value=exists-username",
 			expectedCode: http.StatusInternalServerError,
 			db: dbMockMap{
 				db.Default: []sqlExpect{{
-					[]string{"SELECT .+ FROM .user. WHERE (username|email) = ?"},
-					errors.New(""),
+					"SELECT .+ FROM .user. WHERE username = ?",
+					errDummy,
 					false,
 				}},
 			},
 		},
-		// testing client error
+		// client error cases
 		{
 			name:         "empty query",
-			url:          "/user-availibility",
+			url:          url,
 			expectedCode: http.StatusBadRequest,
 			expectedBody: `{
 				"status": "fail",
@@ -144,7 +145,7 @@ func TestUserAvailibility(t *testing.T) {
 		},
 		{
 			name:         "invalid context",
-			url:          "/user-availibility?context=neither-username-nor-email",
+			url:          url + "?context=neither-username-nor-email",
 			expectedCode: http.StatusBadRequest,
 			expectedBody: `{
 				"status": "fail",
@@ -155,18 +156,18 @@ func TestUserAvailibility(t *testing.T) {
 		},
 		routeTestCase{
 			name:         "invalid username format",
-			url:          "/user-availibility?context=username&value=x",
+			url:          url + "?context=username&value=x",
 			expectedCode: http.StatusBadRequest,
 			expectedBody: `{
 				"status": "fail",
 				"data": {
-					"value": "value must be at least 4 characters in length"
+					"value": "value must be at least 5 characters in length"
 				}
 			}`,
 		},
 		routeTestCase{
-			name:         "unacceptable email",
-			url:          "/user-availibility?context=email&value=unacceptable-email@domain",
+			name:         "invalid email format",
+			url:          url + "?context=email&value=invalid-email.domain",
 			expectedCode: http.StatusBadRequest,
 			expectedBody: `{
 				"status": "fail",
@@ -175,10 +176,10 @@ func TestUserAvailibility(t *testing.T) {
 				}
 			}`,
 		},
-		// testing when success
+		// success cases
 		routeTestCase{
-			name:         "username or email is not registered",
-			url:          "/user-availibility?context=username&value=exists-username",
+			name:         "username is not registered",
+			url:          url + "?context=username&value=exists-username",
 			expectedCode: http.StatusOK,
 			expectedBody: `{
 				"status": "success",
@@ -188,15 +189,15 @@ func TestUserAvailibility(t *testing.T) {
 			}`,
 			db: dbMockMap{
 				db.Default: []sqlExpect{{
-					[]string{"SELECT .+ FROM .user. WHERE (username|email) = ?"},
+					"SELECT .+ FROM .user. WHERE username = ?",
 					sqlmock.NewRows([]string{"1"}),
 					false,
 				}},
 			},
 		},
 		routeTestCase{
-			name:         "username or email is registered",
-			url:          "/user-availibility?context=username&value=exists-username",
+			name:         "username is registered",
+			url:          url + "?context=username&value=exists-username",
 			expectedCode: http.StatusOK,
 			expectedBody: `{
 				"status": "success",
@@ -206,7 +207,7 @@ func TestUserAvailibility(t *testing.T) {
 			}`,
 			db: dbMockMap{
 				db.Default: []sqlExpect{{
-					[]string{"SELECT .+ FROM .user. WHERE (username|email) = ?"},
+					"SELECT .+ FROM .user. WHERE username = ?",
 					sqlmock.NewRows([]string{"1"}).
 						AddRow("1"),
 					false,
@@ -221,38 +222,38 @@ func TestUserAvailibility(t *testing.T) {
 }
 
 func TestUserRegister(t *testing.T) {
+	const url = "/register"
+
 	router := SetupRouter()
 	cases := []routeTestCase{
+		// client error cases
 		{
 			name:         "empty body",
-			url:          "/register",
+			url:          url,
 			method:       http.MethodPost,
 			expectedCode: http.StatusBadRequest,
 		},
-		{
-			name:         "valid body",
-			url:          "/register",
+		routeTestCase{
+			name:         "username too long",
+			url:          url,
 			method:       http.MethodPost,
-			expectedCode: http.StatusOK,
+			expectedCode: http.StatusBadRequest,
+			expectedBody: `{
+				"status": "fail",
+				"data": {
+					"username": "username must be a maximum of 64 characters in length"		
+				}
+			}`,
 			body: `{
 				"email": "new-user@domain.tld",
-				"username": "new-usr",
+				"username": "qwertyuiop1234567890123456789012345678901234567890123456789012345",
 				"password": "new-user",
 				"name": "new-user"
 			}`,
-			db: dbMockMap{
-				db.Default: []sqlExpect{
-					{
-						[]string{"INSERT INTO .user."},
-						sqlmock.NewResult(1, 1),
-						true,
-					},
-				},
-			},
 		},
 		{
 			name:         "username or email is exists",
-			url:          "/register",
+			url:          url,
 			method:       http.MethodPost,
 			expectedCode: http.StatusConflict,
 			body: `{
@@ -264,8 +265,30 @@ func TestUserRegister(t *testing.T) {
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					{
-						[]string{"INSERT INTO .user."},
+						"INSERT INTO .user.",
 						&mysql.MySQLError{Number: uint16(1062)},
+						true,
+					},
+				},
+			},
+		},
+		// success cases
+		{
+			name:         "valid body",
+			url:          url,
+			method:       http.MethodPost,
+			expectedCode: http.StatusOK,
+			body: `{
+				"email": "new-user@domain.tld",
+				"username": "new-usr",
+				"password": "new-user",
+				"name": "new-user"
+			}`,
+			db: dbMockMap{
+				db.Default: []sqlExpect{
+					{
+						"INSERT INTO .user.",
+						sqlmock.NewResult(1, 1),
 						true,
 					},
 				},
@@ -288,7 +311,7 @@ func TestUserUpdate(t *testing.T) {
 			method:       http.MethodPut,
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
@@ -302,7 +325,7 @@ func TestUserUpdate(t *testing.T) {
 			method:       http.MethodPut,
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			body: `{
 				"email": "email@domain.tld",
@@ -311,7 +334,7 @@ func TestUserUpdate(t *testing.T) {
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"UPDATE .user. SET .+ WHERE"},
+						"UPDATE .user. SET .+ WHERE",
 						gorm.ErrRecordNotFound,
 						true,
 					},
@@ -325,7 +348,7 @@ func TestUserUpdate(t *testing.T) {
 			method:       http.MethodPut,
 			expectedCode: http.StatusOK,
 			header: http.Header{
-				accessTokenHeader: []string{makeAccessToken(1)},
+				AccessTokenHeader: []string{makeAccessToken(1)},
 			},
 			body: `{
 				"email": "email@domain.tld",
@@ -334,7 +357,7 @@ func TestUserUpdate(t *testing.T) {
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"UPDATE .user. SET .+ WHERE"},
+						"UPDATE .user. SET .+ WHERE",
 						sqlmock.NewResult(0, 1),
 						true,
 					},
@@ -359,7 +382,7 @@ func TestUserDelete(t *testing.T) {
 			method:       http.MethodDelete,
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
@@ -373,13 +396,13 @@ func TestUserDelete(t *testing.T) {
 			method:       http.MethodDelete,
 			expectedCode: http.StatusNotFound,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"DELETE FROM .user. WHERE"},
+						"DELETE FROM .user. WHERE",
 						gorm.ErrRecordNotFound,
 						true,
 					},
@@ -392,13 +415,13 @@ func TestUserDelete(t *testing.T) {
 			method:       http.MethodDelete,
 			expectedCode: http.StatusOK,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{"DELETE FROM .user. WHERE"},
+						"DELETE FROM .user. WHERE",
 						sqlmock.NewResult(1, 1),
 						true,
 					},
@@ -424,7 +447,7 @@ func TestUserCreateOne(t *testing.T) {
 			method:       http.MethodPost,
 			expectedCode: http.StatusBadRequest,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			db: dbMockMap{
 				db.Default: []sqlExpect{
@@ -448,7 +471,7 @@ func TestUserCreateOne(t *testing.T) {
 				}
 			}`,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			body: `{}`,
 			db: dbMockMap{
@@ -463,7 +486,7 @@ func TestUserCreateOne(t *testing.T) {
 			method:       http.MethodPost,
 			expectedCode: http.StatusConflict,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			body: `{
 				"email": "new-user@domain.tld",
@@ -476,7 +499,7 @@ func TestUserCreateOne(t *testing.T) {
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{`INSERT INTO .user.`},
+						`INSERT INTO .user.`,
 						&mysql.MySQLError{Number: uint16(1062)},
 						true,
 					},
@@ -496,7 +519,7 @@ func TestUserCreateOne(t *testing.T) {
 				}	
 			}`,
 			header: http.Header{
-				accessTokenHeader: []string{accessToken},
+				AccessTokenHeader: []string{accessToken},
 			},
 			body: `{
 				"email": "new-user@domain.tld",
@@ -509,7 +532,7 @@ func TestUserCreateOne(t *testing.T) {
 				db.Default: []sqlExpect{
 					sqlExpectAuthRole("administrator"),
 					{
-						[]string{`INSERT INTO .user.`},
+						`INSERT INTO .user.`,
 						sqlmock.NewResult(1, 1),
 						true,
 					},

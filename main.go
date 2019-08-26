@@ -2,11 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
+
+	"github.com/logrusorgru/aurora"
 
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/swaggo/gin-swagger/swaggerFiles"
 
 	"github.com/frullah/gin-boilerplate/fs"
+	"github.com/frullah/gin-boilerplate/models"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -35,11 +39,15 @@ import (
 // @BasePath /
 func main() {
 	fmt.Println("Initializing server...")
-	gin.SetMode(gin.ReleaseMode)
 
 	fs.InitAsOS()
-	config.Init()
-	db.Init()
+	if err := config.Init(); err != nil {
+		panic(err)
+	}
+	if err := db.Init(); err != nil {
+		panic(err)
+	}
+
 	defer db.Close()
 
 	cnf := config.Get()
@@ -50,16 +58,36 @@ func main() {
 
 	host := fmt.Sprintf("%s:%d", cnf.Server.Host, port)
 
+	// initialize router
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
-	router.Use(cors.Default())
+
+	// initialize cors
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AddAllowHeaders(
+		controllers.AccessTokenHeader,
+		controllers.RefreshTokenHeader,
+	)
+	corsConfig.AllowAllOrigins = true
+
+	router.Use(cors.New(corsConfig))
 	controllers.LoadRoutes(router)
+	if os.Getenv("APP_ENV") == "test" {
+		fmt.Println(aurora.Yellow("Running in testing mode"))
+
+		// add reset db handler for test environment
+		router.POST("/db/user/reset", func(ctx *gin.Context) {
+			db.Get(db.Default).Delete(&models.User{})
+		})
+	}
 
 	swaggerURL := ginSwagger.URL(fmt.Sprintf("http://%s/swagger/doc.json", host))
 	swaggerHandler := ginSwagger.WrapHandler(swaggerFiles.Handler, swaggerURL)
 	router.GET("/swagger/*any", swaggerHandler)
 
-	fmt.Println("Server initialized!")
-	fmt.Println("Server running on " + host + "\n")
+	fmt.Println(aurora.BrightGreen("Server initialized!"))
+	fmt.Println("Server running on", aurora.BrightBlue(host))
+	fmt.Println()
 
 	router.Run(host)
 }

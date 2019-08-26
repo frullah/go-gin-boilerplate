@@ -10,7 +10,7 @@
             "email": "support@swagger.io"
         },
         "license": {
-            "name": "Apache 2.0",
+            "name": "MIT",
             "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
         },
         "version": "2.0"
@@ -18,7 +18,51 @@
     "host": "http://localhost:3000",
     "basePath": "/",
     "paths": {
+        "/auth/data": {
+            "get": {
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/type"
+                        }
+                    },
+                    "401": {}
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/struct"
+                        }
+                    },
+                    "401": {},
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "Disabled"
+                        }
+                    }
+                }
+            }
+        },
         "/users": {
+            "get": {
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "401": {},
+                    "403": {}
+                }
+            },
             "post": {
                 "consumes": [
                     "application/json"
@@ -34,6 +78,9 @@
                     "403": {}
                 }
             }
+        },
+        "/users/register": {
+            "post": {}
         },
         "/users/{id}": {
             "put": {
@@ -102,11 +149,11 @@
                 "email": {
                     "type": "string"
                 },
+                "enabled": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "integer"
-                },
-                "isEnabled": {
-                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -126,11 +173,11 @@
         "models.UserRole": {
             "type": "object",
             "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "integer"
-                },
-                "isEnabled": {
-                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"

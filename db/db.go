@@ -3,7 +3,6 @@ package db
 import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/frullah/gin-boilerplate/config"
-	"github.com/frullah/gin-boilerplate/models"
 	"github.com/jinzhu/gorm"
 )
 
@@ -43,14 +42,14 @@ func Init() error {
 		db[dbInstanceMap[dbInstanceConf.Name]] = dbInstance
 	}
 
-	userModel := new(models.User)
-	userRoleModel := new(models.UserRole)
+	// userModel := new(models.User)
+	// userRoleModel := new(models.UserRole)
 
-	defaultDB := db[Default]
-	defaultDB.AutoMigrate(userRoleModel)
-	defaultDB.AutoMigrate(userModel).
-		AddIndex("role_id__index", "role_id").
-		AddForeignKey("role_id", "user_role(id)", "CASCADE", "CASCADE")
+	// defaultDB := db[Default]
+	// defaultDB.AutoMigrate(userRoleModel)
+	// defaultDB.AutoMigrate(userModel).
+	// 	AddIndex("role_id__index", "role_id").
+	// 	AddForeignKey("role_id", "user_role(id)", "CASCADE", "CASCADE")
 
 	return nil
 }
@@ -72,6 +71,5 @@ func SetupTest(instance Instance) (sqlmock.Sqlmock, func() error) {
 	dbMock, sqlMock, _ := sqlmock.New()
 	db[instance], _ = gorm.Open("sqlite3", dbMock)
 	db[instance].SingularTable(true)
-	db[instance].LogMode(true)
 	return sqlMock, db[instance].Close
 }

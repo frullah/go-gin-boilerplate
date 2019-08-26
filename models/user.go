@@ -12,3 +12,12 @@ type User struct {
 	Enabled  bool      `json:"enabled,omitempty" gorm:"not null"`
 	Verified bool      `json:"verified,omitempty" gorm:"not null"`
 }
+
+// IsEnabled state from the users
+func (u *User) IsEnabled() bool {
+	if u.Role == nil {
+		return u.Role.Enabled && u.Enabled
+	}
+
+	return u.Enabled
+}

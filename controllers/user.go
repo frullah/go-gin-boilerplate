@@ -17,6 +17,8 @@ import (
 	"github.com/frullah/gin-boilerplate/models"
 )
 
+const defaultUserRoleID = 58
+
 // LoadUserRoutes to router
 func LoadUserRoutes(engine *gin.Engine) {
 	engine.POST(registerURL, UserRegister)
@@ -26,7 +28,7 @@ func LoadUserRoutes(engine *gin.Engine) {
 	authorized := group.Group("")
 	authorized.Use(
 		AuthRolesMiddleware(map[string]struct{}{
-			"admministrator": {},
+			"administrator": {},
 		}),
 	)
 	authorized.GET(":id", UserGetOne)
@@ -36,19 +38,23 @@ func LoadUserRoutes(engine *gin.Engine) {
 }
 
 // UserAvailibility check the username or email is available to register
+// @Success 200 {object} models.User
+// @Failure 401
+// @Failure 403
+// @Router /user-availibility [get]
 func UserAvailibility(c *gin.Context) {
 	var data interface{}
 	qCtx := c.Query("context")
 	value := c.Query("value")
 
 	switch strings.ToUpper(qCtx) {
-	case "USERNAME":
-		data = &struct {
-			Value string `json:"value" binding:"required,min=4,max=64"`
-		}{value}
 	case "EMAIL":
 		data = &struct {
 			Value string `json:"value" binding:"required,email"`
+		}{value}
+	case "USERNAME":
+		data = &struct {
+			Value string `json:"value" binding:"required,username"`
 		}{value}
 	default:
 		c.JSON(http.StatusBadRequest, &Response{
@@ -72,7 +78,6 @@ func UserAvailibility(c *gin.Context) {
 	err := db.Get(db.Default).Raw(query, value).Row().Scan(&exists)
 	if err != nil && err != sql.ErrNoRows {
 		c.Error(err)
-		c.Abort()
 		return
 	}
 
@@ -88,17 +93,17 @@ func UserAvailibility(c *gin.Context) {
 // @Success 200 {object} models.User
 // @Failure 401
 // @Failure 403
-// @Router /users [post]
+// @Router /users [get]
 func UserGetOne(ctx *gin.Context) {
 	id, err := mustParseUintParam(ctx, "id", 64)
 	if err != nil {
 		return
 	}
 
-	user := &models.User{Role: &models.UserRole{}}
+	user := models.User{Role: &models.UserRole{}}
 	if err := db.Get(db.Default).
 		Select("id, email, username, name, enabled").
-		First(user, id).
+		First(&user, id).
 		Related(user.Role, "Role").
 		Error; err != nil {
 		ctx.Error(err)
@@ -106,7 +111,7 @@ func UserGetOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, &Response{"success", user})
+	ctx.PureJSON(http.StatusOK, &Response{"success", &user})
 }
 
 // UserCreateOne docs
@@ -118,8 +123,8 @@ func UserGetOne(ctx *gin.Context) {
 func UserCreateOne(ctx *gin.Context) {
 	data := struct {
 		Email    string `json:"email" binding:"required,email"`
-		Username string `json:"username" binding:"required,min=5,max=64"`
-		Password string `json:"password" binding:"required,min=5,max=64"`
+		Username string `json:"username" binding:"required,username"`
+		Password string `json:"password" binding:"required,password"`
 		Name     string `json:"name" binding:"required,max=64"`
 		RoleID   uint32 `json:"roleId" binding:"required,min=1"`
 		Enabled  bool   `json:"enabled"`
@@ -146,7 +151,7 @@ func UserCreateOne(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, &Response{"success", Uint64ID{*user.ID}})
+	ctx.PureJSON(http.StatusOK, &Response{"success", Uint64ID{*user.ID}})
 }
 
 // UserUpdate docs
@@ -165,8 +170,8 @@ func UserUpdate(ctx *gin.Context) {
 
 	body := struct {
 		Email    string `json:"email,omitempty" binding:"omitempty,email"`
-		Username string `json:"username,omitempty" binding:"omitempty,min=5,max=64"`
-		Password string `json:"password,omitempty" binding:"omitempty,min=5,max=64"`
+		Username string `json:"username,omitempty" binding:"omitempty,username"`
+		Password string `json:"password,omitempty" binding:"omitempty,password"`
 		Name     string `json:"name,omitempty" binding:"omitempty,max=64"`
 		RoleID   uint32 `json:"roleId,omitempty" binding:"omitempty,min=1"`
 		Enabled  bool   `json:"enabled,omitempty"`
@@ -192,7 +197,7 @@ func UserUpdate(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, &Response{"success", nil})
+	ctx.PureJSON(http.StatusOK, &Response{"success", nil})
 }
 
 // UserDelete docs
@@ -215,19 +220,21 @@ func UserDelete(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, &Response{"success", nil})
+	ctx.PureJSON(http.StatusOK, &Response{"success", nil})
 }
 
-// UserRegister handles POST /users/register
+// UserRegister docs
+// @Success 200 {object} models.User
+// @Failure 401
+// @Router /users/register [post]
 func UserRegister(ctx *gin.Context) {
 	data := struct {
 		Email    string `json:"email" binding:"required,email"`
-		Username string `json:"username" binding:"required,min=5,max=64"`
-		Password string `json:"password" binding:"required,min=5,max=64"`
+		Username string `json:"username" binding:"required,username"`
+		Password string `json:"password" binding:"required,password"`
 		Name     string `json:"name" binding:"required,max=64"`
 	}{}
 	if err := ctx.BindJSON(&data); err != nil {
-		ctx.Error(err)
 		return
 	}
 
@@ -236,15 +243,14 @@ func UserRegister(ctx *gin.Context) {
 		Username: data.Username,
 		Password: data.Password,
 		Name:     data.Name,
+		RoleID:   defaultUserRoleID,
 	}
 	if err := db.Get(db.Default).
-		Model(&newUser).
 		Create(&newUser).
 		Error; err != nil {
 		ctx.Error(err)
-		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, Response{"success", IntID{int(*newUser.ID)}})
+	ctx.PureJSON(http.StatusOK, Response{"success", IntID{int(*newUser.ID)}})
 }
